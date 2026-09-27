@@ -99,7 +99,9 @@ export function collectPendingControls(groups: MessageGroup[]): PendingControl[]
 }
 
 function bubbleTools(bubble: Bubble): ToolItem[] {
-  if (bubble.kind === "assistant") return bubble.tools;
+  if (bubble.kind === "assistant") return [];
+  if (bubble.kind === "thought") return bubble.tools;
+  if (bubble.kind === "cards") return [];
   if (bubble.kind === "tool-result") return [bubble.tool];
   return [];
 }

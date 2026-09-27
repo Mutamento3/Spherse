@@ -42,7 +42,7 @@ describe("MessageList", () => {
         kind: "turn",
         user: { kind: "user", id: "u1", text: "first" },
         hasError: false,
-        bubbles: [{ kind: "assistant", id: "b1", entryId: "a1", text: "one", tools: [] }],
+        bubbles: [{ kind: "assistant", id: "b1", entryId: "a1", text: "one" }],
       },
       {
         id: "g2",
@@ -67,7 +67,7 @@ describe("MessageList", () => {
         kind: "turn",
         user: { kind: "user", id: "e0", seq: 0, text: "question" },
         hasError: false,
-        bubbles: [{ kind: "assistant", id: "b1", entryId: "e1", text: "answer", tools: [] }],
+        bubbles: [{ kind: "assistant", id: "b1", entryId: "e1", text: "answer" }],
       },
       {
         id: "g2",
@@ -90,7 +90,7 @@ describe("MessageList", () => {
       triggerName: "daily",
       hasError: false,
       user: { kind: "user", id: "e0", seq: 0, text: "go", triggered: true },
-      bubbles: [{ kind: "assistant", id: "b1", entryId: "e1", seq: 1, text: "done", tools: [] }],
+      bubbles: [{ kind: "assistant", id: "b1", entryId: "e1", seq: 1, text: "done" }],
     };
     renderList([triggerGroup], { locateSeq: 1 });
     expect(document.querySelector('[data-entry-seq="1"]')).not.toBeNull();
@@ -104,13 +104,14 @@ describe("MessageList", () => {
       triggerName: "daily",
       hasError: false,
       user: { kind: "user", id: "e0", seq: 0, text: "go", triggered: true },
-      bubbles: [{ kind: "assistant", id: "b1", entryId: "e1", seq: 1, text: "done", tools: [] }],
+      bubbles: [{ kind: "assistant", id: "b1", entryId: "e1", seq: 1, text: "done" }],
     };
     renderList([triggerGroup], { locateSeq: 9 });
     expect(document.querySelector('[data-entry-seq="1"]')).toBeNull();
   });
 
-  it("renders an orphan tool result bubble instead of dropping it", () => {
+  it("renders an orphan tool result bubble instead of dropping it", async () => {
+    const user = userEvent.setup();
     renderList([
       {
         id: "g1",
@@ -124,7 +125,107 @@ describe("MessageList", () => {
         }],
       },
     ]);
+    expect(screen.getByText("思考过程")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /思考过程/ }));
     expect(screen.getByText("read_file")).toBeInTheDocument();
+  });
+
+  it("renders a thought bubble ahead of text bubbles and passes turn activity", () => {
+    renderList([
+      {
+        id: "g1",
+        kind: "turn",
+        user: { kind: "user", id: "u1", text: "go" },
+        hasError: false,
+        bubbles: [
+          {
+            kind: "thought",
+            id: "b:thought:a1",
+            entryId: "a1",
+            tools: [{ toolCallId: "tc1", toolName: "read_file", args: {}, status: "running" }],
+          },
+          { kind: "assistant", id: "b:a2", entryId: "a2", text: "partial" },
+        ],
+      },
+    ], { streaming: true });
+    expect(document.querySelector("[data-chat-thought]")).not.toBeNull();
+    expect(screen.getByText("正在思考…")).toBeInTheDocument();
+    const messages = [...document.querySelectorAll("[data-chat-message]")];
+    expect(messages).toHaveLength(2);
+    expect(messages[0]?.textContent).toContain("partial");
+    expect(messages[1]?.textContent).toContain("go");
+  });
+
+  it("renders cards bubbles in entry order between text bubbles", () => {
+    renderList([
+      {
+        id: "g1",
+        kind: "turn",
+        user: { kind: "user", id: "u1", text: "画两张图" },
+        hasError: false,
+        bubbles: [
+          { kind: "thought", id: "b:thought:a1", entryId: "a1", tools: [] },
+          {
+            kind: "cards",
+            id: "b:cards:a1",
+            entryId: "a1",
+            tools: [{
+              toolCallId: "tc1",
+              toolName: "generate_image",
+              args: { prompt: "猫" },
+              status: "completed",
+              card: { type: "image", status: "done", path: "cat.png", prompt: "猫", mimeType: "image/png" },
+            }],
+          },
+          { kind: "assistant", id: "b:a2", entryId: "a2", text: "中间说明" },
+          {
+            kind: "cards",
+            id: "b:cards:a3",
+            entryId: "a3",
+            tools: [{
+              toolCallId: "tc2",
+              toolName: "generate_image",
+              args: { prompt: "狗" },
+              status: "completed",
+              card: { type: "image", status: "done", path: "dog.png", prompt: "狗", mimeType: "image/png" },
+            }],
+          },
+        ],
+      },
+    ]);
+    const cards = document.querySelector("[data-chat-cards]");
+    expect(cards).not.toBeNull();
+    expect(screen.getByAltText("猫")).toBeInTheDocument();
+    expect(screen.getByAltText("狗")).toBeInTheDocument();
+    const messages = [...document.querySelectorAll("[data-chat-message]")];
+    expect(messages.map((node) => node.textContent)).toEqual(
+      expect.arrayContaining([expect.stringContaining("画两张图"), expect.stringContaining("中间说明")]),
+    );
+  });
+
+  it("renders an orphan tool result with a card as visible cards", () => {
+    renderList([
+      {
+        id: "g1",
+        kind: "turn",
+        hasError: false,
+        bubbles: [{
+          kind: "tool-result",
+          id: "b:t1",
+          entryId: "t1",
+          tool: {
+            toolCallId: "tc1",
+            toolName: "generate_image",
+            args: { prompt: "猫" },
+            status: "completed",
+            card: { type: "image", status: "done", path: "cat.png", prompt: "猫", mimeType: "image/png" },
+          },
+        }],
+      },
+    ]);
+    expect(screen.getByAltText("猫")).toBeInTheDocument();
+    expect(document.querySelector("[data-chat-cards]")).not.toBeNull();
+    expect(document.querySelector("[data-chat-thought]")).toBeNull();
   });
 
   it("shows the thinking indicator when waiting for the first token", () => {

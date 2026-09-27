@@ -22,8 +22,14 @@ test("history rendering covers message, tool, trigger and error events; retried/
     await expect(page.getByText("第一条助手回复")).toBeVisible();
     await expect(page.locator('img[src*="uploads/pic.png"]')).toHaveCount(1);
 
-    await expect(page.getByText("run_command")).toBeVisible();
     await expect(page.getByText("printf history-ok")).toBeVisible();
+
+    const thought = page.locator("[data-chat-thought]");
+    await expect(thought).toHaveCount(1);
+    await expect(thought).toContainText("思考过程");
+    await expect(page.getByText("read_file")).toHaveCount(0);
+    await thought.getByRole("button", { name: /思考过程/ }).click();
+    await expect(page.getByText("read_file")).toBeVisible();
 
     await expect(page.locator("iframe")).toHaveCount(1);
 

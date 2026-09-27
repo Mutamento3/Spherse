@@ -8,12 +8,15 @@ import { seqFromPersistedEntryId, type UserEntry } from "./model/entry";
 import { AssistantBubble } from "./AssistantBubble";
 import { UserBubble } from "./UserBubble";
 import { TriggerTurnGroup } from "./TriggerTurnGroup";
+import { ThoughtBlock } from "./ThoughtBlock";
+import { ToolCards } from "./ToolCards";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 
 interface MessageListProps {
   groups: MessageGroup[];
   agent: AgentSummary;
   thinking: boolean;
+  streaming?: boolean;
   runningGroupId?: string | null;
   withdrawableUserId: string | null;
   supersededToolCallIds: Set<string>;
@@ -42,6 +45,7 @@ export function MessageList({
   groups,
   agent,
   thinking,
+  streaming = false,
   runningGroupId,
   withdrawableUserId,
   supersededToolCallIds,
@@ -99,18 +103,52 @@ export function MessageList({
     const showTime = index === group.bubbles.length - 1;
     const isRetryTarget = bubble.id === lastBubble?.id;
     const entrySeq = bubble.seq ?? seqFromPersistedEntryId(bubble.entryId);
-    if (bubble.kind === "tool-result") {
+    const isActiveGroup = streaming && group.id === lastGroup?.id;
+    if (bubble.kind === "thought") {
       return (
-        <AssistantBubble
+        <ThoughtBlock
           key={bubble.id}
-          agent={agent}
-          text=""
-          tools={[bubble.tool]}
+          tools={bubble.tools}
+          awaiting={bubble.awaiting}
+          active={isActiveGroup}
+          timestamp={bubble.timestamp}
           showTime={showTime}
-          entrySeq={entrySeq}
+          runChanges={bubble.runChanges}
           onNavigateToPath={onNavigateToPath}
+        />
+      );
+    }
+    if (bubble.kind === "cards") {
+      return (
+        <ToolCards
+          key={bubble.id}
+          tools={bubble.tools}
+          timestamp={bubble.timestamp}
+          showTime={showTime}
+          supersededToolCallIds={supersededToolCallIds}
           onRespondApproval={onRespondApproval}
           onRespondQuestion={onRespondQuestion}
+        />
+      );
+    }
+    if (bubble.kind === "tool-result") {
+      if (bubble.tool.card) {
+        return (
+          <ToolCards
+            key={bubble.id}
+            tools={[bubble.tool]}
+            supersededToolCallIds={supersededToolCallIds}
+            onRespondApproval={onRespondApproval}
+            onRespondQuestion={onRespondQuestion}
+          />
+        );
+      }
+      return (
+        <ThoughtBlock
+          key={bubble.id}
+          tools={[bubble.tool]}
+          showTime={showTime}
+          onNavigateToPath={onNavigateToPath}
         />
       );
     }
@@ -120,7 +158,6 @@ export function MessageList({
           key={bubble.id}
           agent={agent}
           text=""
-          tools={[]}
           error={bubble.error}
           timestamp={bubble.timestamp}
           showTime={showTime}
@@ -134,17 +171,13 @@ export function MessageList({
         key={bubble.id}
         agent={agent}
         text={bubble.text}
-        tools={bubble.tools}
         streaming={bubble.streaming}
         error={bubble.error}
         timestamp={bubble.timestamp}
         runChanges={bubble.runChanges}
         showTime={showTime}
         entrySeq={entrySeq}
-        supersededToolCallIds={supersededToolCallIds}
         onNavigateToPath={onNavigateToPath}
-        onRespondApproval={onRespondApproval}
-        onRespondQuestion={onRespondQuestion}
         onRetry={isRetryTarget ? onRetry : undefined}
       />
     );

@@ -17,7 +17,7 @@ const agent = { id: "a1", name: "Helper", alias: "" } as unknown as AgentSummary
 
 function renderBubble(props: Partial<Parameters<typeof AssistantBubble>[0]> = {}) {
   return renderWithProviders(
-    <AssistantBubble agent={agent} text="hello" tools={[]} {...props} />,
+    <AssistantBubble agent={agent} text="hello" {...props} />,
     { bridge: createMockHostBridge() },
   );
 }
@@ -27,7 +27,7 @@ describe("AssistantBubble", () => {
     const user = userEvent.setup();
     const openExternal = vi.fn(async () => {});
     renderWithProviders(
-      <AssistantBubble agent={agent} text="[docs](https://example.com/x)" tools={[]} />,
+      <AssistantBubble agent={agent} text="[docs](https://example.com/x)" />,
       { bridge: createMockHostBridge({ openExternal }) },
     );
 
@@ -39,7 +39,7 @@ describe("AssistantBubble", () => {
     const user = userEvent.setup();
     const openExternal = vi.fn(async () => {});
     renderWithProviders(
-      <AssistantBubble agent={agent} text="[jump](#section)" tools={[]} />,
+      <AssistantBubble agent={agent} text="[jump](#section)" />,
       { bridge: createMockHostBridge({ openExternal }) },
     );
 
@@ -47,18 +47,9 @@ describe("AssistantBubble", () => {
     expect(openExternal).not.toHaveBeenCalled();
   });
 
-  it("shows the thinking indicator and hides the footer while streaming", () => {
-    renderBubble({ text: "", streaming: true });
-    expect(document.querySelector(".animate-bounce")).not.toBeNull();
+  it("hides the footer while streaming", () => {
+    renderBubble({ streaming: true });
     expect(screen.queryByTitle("复制")).not.toBeInTheDocument();
-  });
-
-  it("renders tool rows", () => {
-    renderBubble({
-      tools: [{ toolCallId: "tc1", toolName: "read_file", args: { path: "a.ts" }, status: "completed" }],
-    });
-    expect(screen.getByText("read_file")).toBeInTheDocument();
-    expect(screen.getByText("→ a.ts")).toBeInTheDocument();
   });
 
   it("offers a retry action for errors and hides it when retry is suppressed", async () => {

@@ -4,6 +4,8 @@ import type {
   ChatEntry,
   EntryError,
   EntryId,
+  ErrorEntry,
+  ToolResultEntry,
   UserEntry,
 } from "./entry";
 import { applyRunChanges } from "./run-changes";
@@ -15,15 +17,27 @@ export type AssistantBubble = {
   entryId: EntryId;
   seq?: number;
   text: string;
-  tools: ToolItem[];
   streaming?: boolean;
   error?: EntryError;
   timestamp?: number;
   runChanges?: FileChangeCard[];
 };
 
+export type ThoughtBubble = {
+  kind: "thought";
+  id: string;
+  entryId: EntryId;
+  seq?: number;
+  tools: ToolItem[];
+  awaiting?: true;
+  timestamp?: number;
+  runChanges?: FileChangeCard[];
+};
+
 export type Bubble =
   | AssistantBubble
+  | ThoughtBubble
+  | { kind: "cards"; id: string; entryId: EntryId; seq?: number; timestamp?: number; tools: ToolItem[] }
   | { kind: "tool-result"; id: string; entryId: EntryId; seq?: number; tool: ToolItem }
   | { kind: "error"; id: string; entryId: EntryId; seq?: number; error: EntryError; timestamp?: number };
 
@@ -36,17 +50,18 @@ export interface MessageGroup {
   bubbles: Bubble[];
 }
 
-interface GroupBuilder {
+interface TurnBuilder {
   group: MessageGroup;
-  bubblesByEntryId: Map<EntryId, AssistantBubble>;
+  entries: ChatEntry[];
 }
 
 export function assembleGroups(entries: ChatEntry[]): MessageGroup[] {
   const groups: MessageGroup[] = [];
-  let current: GroupBuilder | null = null;
+  let current: TurnBuilder | null = null;
 
   const close = () => {
     if (!current) return;
+    current.group.bubbles = assembleBubbles(current.group, current.entries);
     applyRunChanges(current.group);
     groups.push(current.group);
     current = null;
@@ -63,7 +78,7 @@ export function assembleGroups(entries: ChatEntry[]): MessageGroup[] {
         hasError: false,
         bubbles: [],
       };
-      current = { group, bubblesByEntryId: new Map() };
+      current = { group, entries: [] };
       continue;
     }
     if (!current) {
@@ -73,94 +88,163 @@ export function assembleGroups(entries: ChatEntry[]): MessageGroup[] {
         hasError: false,
         bubbles: [],
       };
-      current = { group, bubblesByEntryId: new Map() };
-    }
-    if (entry.kind === "assistant") {
-      const bubble = assistantBubble(entry);
-      current.group.bubbles.push(bubble);
-      current.bubblesByEntryId.set(entry.id, bubble);
-      if (entry.error) current.group.hasError = true;
+      current = { group, entries: [entry] };
       continue;
     }
-    if (entry.kind === "tool-result") {
-      const owner = entry.ownerId !== undefined ? current.bubblesByEntryId.get(entry.ownerId) : undefined;
-      if (owner) {
-        mergeToolResult(owner.tools, entry);
-        continue;
-      }
-      const fallback = findToolOwnerBubble(current.group.bubbles, entry.toolCallId);
-      if (fallback) {
-        mergeToolResult(fallback.tools, entry);
-        continue;
-      }
-      current.group.bubbles.push({
-        kind: "tool-result",
-        id: `b:${entry.id}`,
-        entryId: entry.id,
-        ...(entry.seq !== undefined ? { seq: entry.seq } : {}),
-        tool: toolItemFromResult(entry),
-      });
-      continue;
-    }
-
-    current.group.hasError = true;
-    const last = current.group.bubbles[current.group.bubbles.length - 1];
-    if (last?.kind === "assistant" && last.streaming) {
-      const updated: AssistantBubble = {
-        ...last,
-        streaming: false,
-        error: entryError(entry),
-      };
-      current.group.bubbles[current.group.bubbles.length - 1] = updated;
-      current.bubblesByEntryId.set(last.entryId, updated);
-      continue;
-    }
-    current.group.bubbles.push({
-      kind: "error",
-      id: `b:${entry.id}`,
-      entryId: entry.id,
-      ...(entry.seq !== undefined ? { seq: entry.seq } : {}),
-      error: entryError(entry),
-      ...(entry.time !== undefined ? { timestamp: entry.time } : {}),
-    });
+    current.entries.push(entry);
   }
   close();
   return groups;
 }
+
+function assembleBubbles(group: MessageGroup, entries: ChatEntry[]): Bubble[] {
+  const assistantEntries: AssistantEntry[] = [];
+  const toolResults: ToolResultEntry[] = [];
+  const errorEntries: ErrorEntry[] = [];
+  for (const entry of entries) {
+    if (entry.kind === "assistant") assistantEntries.push(entry);
+    else if (entry.kind === "tool-result") toolResults.push(entry);
+    else if (entry.kind === "error") errorEntries.push(entry);
+  }
+
+  let interruptedEntryId: EntryId | undefined;
+  let interruptedError: EntryError | undefined;
+  const standaloneErrors: ErrorEntry[] = [];
+  if (errorEntries.length > 0) {
+    const streamingTarget = findLast(assistantEntries, (candidate) => candidate.streaming === true);
+    if (streamingTarget) {
+      interruptedEntryId = streamingTarget.id;
+      interruptedError = entryError(errorEntries[errorEntries.length - 1]);
+      standaloneErrors.push(...errorEntries.slice(0, -1));
+    } else {
+      standaloneErrors.push(...errorEntries);
+    }
+    group.hasError = true;
+  }
+
+  const bubbles: Bubble[] = [];
+
+  const ownerIndexByToolCallId = new Map<string, number>();
+  const tools: ToolItem[] = [];
+  assistantEntries.forEach((entry, entryIndex) => {
+    for (const toolCall of entry.toolCalls) {
+      ownerIndexByToolCallId.set(toolCall.toolCallId, entryIndex);
+      tools.push({
+        toolCallId: toolCall.toolCallId,
+        toolName: toolCall.toolName,
+        args: toolCall.args,
+        status: entry.seq !== undefined ? ("completed" as const) : ("running" as const),
+      });
+    }
+  });
+
+  const assistantEntryIds = new Set(assistantEntries.map((entry) => entry.id));
+  const orphanResults: ToolResultEntry[] = [];
+  for (const result of toolResults) {
+    const owned =
+      (result.ownerId !== undefined && assistantEntryIds.has(result.ownerId)) ||
+      ownerIndexByToolCallId.has(result.toolCallId);
+    if (!owned) {
+      orphanResults.push(result);
+      continue;
+    }
+    if (!ownerIndexByToolCallId.has(result.toolCallId)) {
+      const ownerIndex = assistantEntries.findIndex((entry) => entry.id === result.ownerId);
+      ownerIndexByToolCallId.set(result.toolCallId, ownerIndex >= 0 ? ownerIndex : 0);
+    }
+    mergeToolResult(tools, result);
+  }
+
+  const cardsByEntryIndex = new Map<number, ToolItem[]>();
+  for (const tool of tools) {
+    if (!tool.card) continue;
+    const ownerIndex = ownerIndexByToolCallId.get(tool.toolCallId) ?? 0;
+    const group = cardsByEntryIndex.get(ownerIndex);
+    if (group) group.push(tool);
+    else cardsByEntryIndex.set(ownerIndex, [tool]);
+  }
+
+  if (assistantEntries.length > 0) {
+    const anchor = assistantEntries[0];
+    const awaiting = assistantEntries.some(
+      (entry) => entry.streaming === true && entry.text === "" && entry.toolCalls.length === 0,
+    );
+    bubbles.push({
+      kind: "thought",
+      id: `b:thought:${anchor.id}`,
+      entryId: anchor.id,
+      ...(anchor.seq !== undefined ? { seq: anchor.seq } : {}),
+      tools,
+      ...(awaiting ? { awaiting: true } : {}),
+      ...(anchor.time !== undefined ? { timestamp: anchor.time } : {}),
+    });
+  }
+
+  assistantEntries.forEach((entry, entryIndex) => {
+    const interrupted = entry.id === interruptedEntryId;
+    const error = entry.error ?? (interrupted ? interruptedError : undefined);
+    if (entry.text !== "" || error !== undefined) {
+      if (error !== undefined) group.hasError = true;
+      const streaming = entry.streaming === true && !interrupted;
+      bubbles.push({
+        kind: "assistant",
+        id: `b:${entry.id}`,
+        entryId: entry.id,
+        ...(entry.seq !== undefined ? { seq: entry.seq } : {}),
+        text: entry.text,
+        ...(streaming ? { streaming: true } : {}),
+        ...(error !== undefined ? { error } : {}),
+        ...(entry.time !== undefined ? { timestamp: entry.time } : {}),
+      });
+    }
+    const entryCards = cardsByEntryIndex.get(entryIndex);
+    if (entryCards && entryCards.length > 0) {
+      bubbles.push({
+        kind: "cards",
+        id: `b:cards:${entry.id}`,
+        entryId: entry.id,
+        ...(entry.seq !== undefined ? { seq: entry.seq } : {}),
+        ...(entry.time !== undefined ? { timestamp: entry.time } : {}),
+        tools: entryCards,
+      });
+    }
+  });
+
+  for (const result of orphanResults) {
+    bubbles.push({
+      kind: "tool-result",
+      id: `b:${result.id}`,
+      entryId: result.id,
+      ...(result.seq !== undefined ? { seq: result.seq } : {}),
+      tool: toolItemFromResult(result),
+    });
+  }
+
+  for (const error of standaloneErrors) {
+    bubbles.push({
+      kind: "error",
+      id: `b:${error.id}`,
+      entryId: error.id,
+      ...(error.seq !== undefined ? { seq: error.seq } : {}),
+      error: entryError(error),
+      ...(error.time !== undefined ? { timestamp: error.time } : {}),
+    });
+  }
+
+  return bubbles;
+}
+
+function findLast<T>(items: T[], predicate: (item: T) => boolean): T | undefined {
+  for (let index = items.length - 1; index >= 0; index--) {
+    if (predicate(items[index])) return items[index];
+  }
+  return undefined;
+}
+
 function entryError(entry: { message: string; code?: EntryError["code"]; retrySuppressed?: boolean }): EntryError {
   return {
     message: entry.message,
     ...(entry.code !== undefined ? { code: entry.code } : {}),
     ...(entry.retrySuppressed ? { retrySuppressed: true } : {}),
   };
-}
-
-function assistantBubble(entry: AssistantEntry): AssistantBubble {
-  const persisted = entry.seq !== undefined;
-  return {
-    kind: "assistant",
-    id: `b:${entry.id}`,
-    entryId: entry.id,
-    ...(entry.seq !== undefined ? { seq: entry.seq } : {}),
-    text: entry.text,
-    tools: entry.toolCalls.map((toolCall) => ({
-      toolCallId: toolCall.toolCallId,
-      toolName: toolCall.toolName,
-      args: toolCall.args,
-      status: persisted ? "completed" : "running",
-    })),
-    ...(entry.streaming ? { streaming: true } : {}),
-    ...(entry.error ? { error: entry.error } : {}),
-    ...(entry.time !== undefined ? { timestamp: entry.time } : {}),
-  };
-}
-
-function findToolOwnerBubble(bubbles: Bubble[], toolCallId: string): AssistantBubble | undefined {
-  for (let index = bubbles.length - 1; index >= 0; index--) {
-    const bubble = bubbles[index];
-    if (bubble.kind === "assistant" && bubble.tools.some((tool) => tool.toolCallId === toolCallId)) {
-      return bubble;
-    }
-  }
-  return undefined;
 }
