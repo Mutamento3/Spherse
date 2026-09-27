@@ -11,6 +11,7 @@ import { useAppUiStore } from "../../stores/app-ui-store";
 import { AgentSessionList } from "../agent-session-list";
 import { SkillPanel } from "../skill-panel";
 import { UserFilePanel } from "../user-file-panel";
+import { CustomSidePanel } from "../custom-side-panel";
 
 function isMacPlatform(): boolean {
   const nav = navigator as Navigator & { userAgentData?: { platform?: string } };
@@ -28,19 +29,23 @@ export function ProjectPanel() {
         render={
           <aside
             data-project-panel
-            className="flex h-full w-65 shrink-0 flex-col overflow-y-auto overflow-x-hidden border-r border-sidebar-border bg-sidebar"
+            className="flex h-full w-65 shrink-0 flex-col overflow-hidden border-r border-sidebar-border bg-sidebar"
           />
         }
       >
-        <SidebarProvider className="min-h-0 w-full">
-          <div className="flex min-w-0 flex-1 flex-col">
-            <div className="border-b border-sidebar-border p-2">
-              <AgentSessionList />
-            </div>
-            <UserFilePanel />
-            <SkillPanel />
+        <CustomSidePanel>
+          <div className="h-full overflow-y-auto overflow-x-hidden">
+            <SidebarProvider className="min-h-0 w-full">
+              <div className="flex min-w-0 flex-1 flex-col">
+                <div className="border-b border-sidebar-border p-2">
+                  <AgentSessionList />
+                </div>
+                <UserFilePanel />
+                <SkillPanel />
+              </div>
+            </SidebarProvider>
           </div>
-        </SidebarProvider>
+        </CustomSidePanel>
       </ContextMenuTrigger>
       <ContextMenuContent>
         <ContextMenuItem

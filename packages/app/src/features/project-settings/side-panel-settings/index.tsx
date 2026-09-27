@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useI18n } from "@spherse/i18n/react";
-import { normalizeWelcomePagePath } from "../../../lib/project-page-paths";
+import { normalizeSidePanelPath } from "../../../lib/project-page-paths";
 import type { ApiClient } from "../../../lib/api";
 import { Button } from "../../../components/ui/button";
 import {
@@ -13,9 +13,9 @@ import {
 } from "../../../components/ui/dialog";
 import { Input } from "../../../components/ui/input";
 import { Field, FieldGroup, FieldLabel } from "../../../components/ui/field";
-import { updateWelcomePageSettings } from "../../../queries/welcome-page";
+import { updateCustomSidePanelSettings } from "../../../queries/custom-side-panel";
 
-export function WelcomePageSettingsDialog({
+export function SidePanelSettingsDialog({
   projectId,
   client,
   open,
@@ -28,23 +28,20 @@ export function WelcomePageSettingsDialog({
 }) {
   const [path, setPath] = useState("");
   const [savedPath, setSavedPath] = useState<string | null>(null);
-  const [_loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const { t } = useI18n();
 
   useEffect(() => {
     if (!open) return;
-    setLoading(true);
     client
-      .getWelcomePageSettings()
+      .getSidePanelSettings()
       .then((settings) => {
         setSavedPath(settings.path);
         setPath(settings.path ?? "");
       })
       .catch((err: unknown) =>
-        toast.error(t("welcome-page-settings.loadFailed", { message: (err as Error).message })),
-      )
-      .finally(() => setLoading(false));
+        toast.error(t("side-panel-settings.loadFailed", { message: (err as Error).message })),
+      );
   }, [client, open, t]);
 
   const handleSave = async () => {
@@ -52,21 +49,21 @@ export function WelcomePageSettingsDialog({
     const valueToSave = trimmed === "" ? null : trimmed;
 
     if (valueToSave !== null) {
-      const normalized = normalizeWelcomePagePath(valueToSave);
+      const normalized = normalizeSidePanelPath(valueToSave);
       if (!normalized) {
-        toast.error(t("welcome-page-settings.invalidPath"));
+        toast.error(t("side-panel-settings.invalidPath"));
         return;
       }
     }
 
     setSaving(true);
     try {
-      const result = await updateWelcomePageSettings(projectId, client, valueToSave);
+      const result = await updateCustomSidePanelSettings(projectId, client, valueToSave);
       setSavedPath(result.path);
-      toast.success(t("welcome-page-settings.saved"));
+      toast.success(t("side-panel-settings.saved"));
       onOpenChange(false);
     } catch (err) {
-      toast.error(t("welcome-page-settings.saveFailed", { message: (err as Error).message }));
+      toast.error(t("side-panel-settings.saveFailed", { message: (err as Error).message }));
     } finally {
       setSaving(false);
     }
@@ -75,13 +72,13 @@ export function WelcomePageSettingsDialog({
   const handleClear = async () => {
     setSaving(true);
     try {
-      const result = await updateWelcomePageSettings(projectId, client, null);
+      const result = await updateCustomSidePanelSettings(projectId, client, null);
       setSavedPath(result.path);
       setPath("");
-      toast.success(t("welcome-page-settings.saved"));
+      toast.success(t("side-panel-settings.saved"));
       onOpenChange(false);
     } catch (err) {
-      toast.error(t("welcome-page-settings.saveFailed", { message: (err as Error).message }));
+      toast.error(t("side-panel-settings.saveFailed", { message: (err as Error).message }));
     } finally {
       setSaving(false);
     }
@@ -91,19 +88,19 @@ export function WelcomePageSettingsDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[480px]">
         <DialogHeader>
-          <DialogTitle>{t("welcome-page-settings.title")}</DialogTitle>
+          <DialogTitle>{t("side-panel-settings.title")}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            {t("welcome-page-settings.description")}
+            {t("side-panel-settings.description")}
           </p>
           <FieldGroup>
             <Field>
-              <FieldLabel>{t("welcome-page-settings.pathLabel")}</FieldLabel>
+              <FieldLabel>{t("side-panel-settings.pathLabel")}</FieldLabel>
               <Input
                 value={path}
                 onChange={(e) => setPath(e.target.value)}
-                placeholder={t("welcome-page-settings.pathPlaceholder")}
+                placeholder={t("side-panel-settings.pathPlaceholder")}
               />
             </Field>
           </FieldGroup>
@@ -111,7 +108,7 @@ export function WelcomePageSettingsDialog({
         <DialogFooter>
           {savedPath && (
             <Button type="button" variant="outline" onClick={handleClear} disabled={saving} className="mr-auto">
-              {t("welcome-page-settings.clear")}
+              {t("side-panel-settings.clear")}
             </Button>
           )}
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
