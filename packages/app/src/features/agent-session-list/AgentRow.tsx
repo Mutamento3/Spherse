@@ -10,7 +10,7 @@ import {
 } from "../../components/ui/context-menu";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
-import { ChevronRightIcon, Clock, PlusIcon } from "lucide-react";
+import { BrainIcon, ChevronRightIcon, Clock, PlusIcon } from "lucide-react";
 import { toast } from "sonner";
 import { useI18n } from "@spherse/i18n/react";
 import { cn } from "@/lib/utils";
@@ -33,6 +33,7 @@ export function AgentRow({ agent, active }: AgentRowProps) {
   const agentDialogEnabled = useFeature("agent-dialog");
   const triggerEnabled = useFeature("agent-trigger");
   const mcpEnabled = useFeature("agent-mcp");
+  const memoryEnabled = useFeature("agent-memory");
   const hasEnabled = useAgentHasEnabledTrigger(projectId, client, agent.id);
   return (
     <div className="group/agent-row relative" data-agent-id={agent.id}>
@@ -48,13 +49,22 @@ export function AgentRow({ agent, active }: AgentRowProps) {
           <span className="overflow-hidden text-ellipsis whitespace-nowrap">
             {agent.name}
           </span>
-          {hasEnabled && (
-            <Clock
-              className="ml-auto size-3.5 shrink-0 text-muted-foreground group-hover/agent-row:hidden"
-              aria-label={t("agent-trigger.indicatorTooltip")}
-            >
-              <title>{t("agent-trigger.indicatorTooltip")}</title>
-            </Clock>
+          {(hasEnabled || agent.memoryEnabled) && (
+            <span className="ml-auto flex shrink-0 items-center gap-1 text-muted-foreground group-hover/agent-row:hidden">
+              {hasEnabled && (
+                <Clock className="size-3.5" aria-label={t("agent-trigger.indicatorTooltip")}>
+                  <title>{t("agent-trigger.indicatorTooltip")}</title>
+                </Clock>
+              )}
+              {agent.memoryEnabled && (
+                <BrainIcon
+                  className="size-3.5"
+                  aria-label={t("agent-memory.indicatorTooltip")}
+                >
+                  <title>{t("agent-memory.indicatorTooltip")}</title>
+                </BrainIcon>
+              )}
+            </span>
           )}
         </ContextMenuTrigger>
         <ContextMenuContent>
@@ -75,6 +85,11 @@ export function AgentRow({ agent, active }: AgentRowProps) {
           {mcpEnabled && (
             <ContextMenuItem onClick={() => actions.mcpAgent(agent)}>
               {t("agent-mcp.menuItem")}
+            </ContextMenuItem>
+          )}
+          {memoryEnabled && (
+            <ContextMenuItem onClick={() => actions.memoryAgent(agent)}>
+              {t("agent-memory.menuItem")}
             </ContextMenuItem>
           )}
           <ContextMenuSeparator />
