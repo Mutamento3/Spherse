@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, fireEvent } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "../../test/render";
@@ -119,6 +119,103 @@ describe("CustomProviderDialog", () => {
       baseUrl: "https://existing.example",
       models: ["m1"],
       keyless: true,
+    });
+  });
+
+  it("prefills headers from initial when open", () => {
+    renderDialog({
+      open: true,
+      initial: {
+        id: "custom-x",
+        name: "Existing",
+        baseUrl: "https://existing.example",
+        models: ["m1"],
+        keyless: false,
+        headers: { "X-Custom": "abc", "X-Other": "def" },
+      },
+    });
+    expect(screen.getByLabelText("自定义 Header")).toHaveValue("X-Custom: abc\nX-Other: def");
+  });
+
+  it("rejects invalid header lines while empty means none", async () => {
+    const user = userEvent.setup();
+    renderDialog();
+
+    await user.type(screen.getByLabelText("名称"), "X");
+    await user.type(screen.getByLabelText("Base URL"), "https://api.example");
+    await user.type(screen.getByLabelText("模型 ID"), "m1");
+    await user.type(screen.getByLabelText("自定义 Header"), "X-Custom");
+    expect(screen.getByText("第 1 行 Header 格式非法：需为非空的 Name: Value")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "保存" })).toBeDisabled();
+
+    await user.clear(screen.getByLabelText("自定义 Header"));
+    await user.type(screen.getByLabelText("自定义 Header"), "X-Ok: v\nBad Name: v");
+    expect(screen.getByText("第 2 行 Header 格式非法：需为非空的 Name: Value")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "保存" })).toBeDisabled();
+
+    await user.clear(screen.getByLabelText("自定义 Header"));
+    await user.type(screen.getByLabelText("自定义 Header"), "X-Empty:");
+    expect(screen.getByText("第 1 行 Header 格式非法：需为非空的 Name: Value")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "保存" })).toBeDisabled();
+
+    await user.clear(screen.getByLabelText("自定义 Header"));
+    fireEvent.change(screen.getByLabelText("自定义 Header"), {
+      target: { value: "X-Ctl: a\x00b" },
+    });
+    expect(screen.getByText("第 1 行 Header 格式非法：需为非空的 Name: Value")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "保存" })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText("自定义 Header"), { target: { value: "" } });
+    await waitFor(() =>
+      expect(screen.queryByText(/^第 \d+ 行 Header 格式非法/)).not.toBeInTheDocument(),
+    );
+    expect(screen.getByRole("button", { name: "保存" })).toBeEnabled();
+  });
+
+  it("parses header lines (split on newline, trim, drop empties, later duplicates win) and submits the def", async () => {
+    const user = userEvent.setup();
+    const { onSubmit } = renderDialog();
+
+    await fillValidForm(user);
+    await user.type(
+      screen.getByLabelText("自定义 Header"),
+      "  X-Custom:  abc  \n\nX-Dup: first\nX-Dup: second\n",
+    );
+    await user.click(screen.getByRole("button", { name: "保存" }));
+
+    expect(onSubmit).toHaveBeenCalledWith({
+      id: "",
+      name: "My Provider",
+      baseUrl: "https://api.example/v1",
+      models: ["m1", "m2", "m3"],
+      keyless: false,
+      headers: { "X-Custom": "abc", "X-Dup": "second" },
+    });
+  });
+
+  it("drops headers in edit mode when the field is cleared", async () => {
+    const user = userEvent.setup();
+    const { onSubmit } = renderDialog({
+      open: true,
+      initial: {
+        id: "custom-x",
+        name: "Existing",
+        baseUrl: "https://existing.example",
+        models: ["m1"],
+        keyless: false,
+        headers: { "X-Custom": "abc" },
+      },
+    });
+
+    await user.clear(screen.getByLabelText("自定义 Header"));
+    await user.click(screen.getByRole("button", { name: "保存" }));
+
+    expect(onSubmit).toHaveBeenCalledWith({
+      id: "custom-x",
+      name: "Existing",
+      baseUrl: "https://existing.example",
+      models: ["m1"],
+      keyless: false,
     });
   });
 });
